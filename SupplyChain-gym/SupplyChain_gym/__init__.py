@@ -14,3 +14,13 @@ register(
     id="NetworkManagement-v2",
     entry_point="SupplyChain_gym.envs:NetInvMgmtLostSalesEnv",
 )
+
+register(
+    id="InventoryManagement-v1",
+    entry_point="SupplyChain_gym.envs:InvManagementBacklogEnv",
+)
+
+register(
+    id="InventoryManagement-v2",
+    entry_point="SupplyChain_gym.envs:InvManagementLostSalesEnv",
+)
