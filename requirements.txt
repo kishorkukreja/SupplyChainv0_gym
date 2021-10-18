@@ -1,0 +1,6 @@
+gym >= 0.17.2
+numpy >= 1.19
+ray >= 0.8.6
+pillow >= 8.3 # not directly required, pinned by Snyk to avoid a vulnerability
+matplotlib >= 3.4.3
+networkx >= 2.6.2
