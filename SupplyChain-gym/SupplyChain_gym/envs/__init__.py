@@ -1,2 +1,3 @@
 from SupplyChain_gym.envs.InventoryEnvFile import InventoryEnv
 from SupplyChain_gym.envs.NetworkManagementFile import NetInvMgmtBacklogEnv
+from SupplyChain_gym.envs.NetworkManagementFile import NetInvMgmtLostSalesEnv
