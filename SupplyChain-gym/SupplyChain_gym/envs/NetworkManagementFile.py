@@ -10,7 +10,7 @@ import numpy as np
 import networkx as nx
 import pandas as pd
 from scipy.stats import *
-from or_gym.utils import assign_env_config
+from SupplyChain_gym.utils import assign_env_config
 from collections import deque
 import matplotlib.pyplot as plt
 
