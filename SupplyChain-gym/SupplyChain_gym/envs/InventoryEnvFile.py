@@ -34,6 +34,35 @@ class InventoryEnv(gym.Env):
             self.state_high = state_high
         self.determine_potential_actions()
         self.determine_potential_states()
+        #self.INV = [[0] for _ in range(self.case.no_stockpoints)]
+        #self.a_w = [[[] for _ in range(self.warehouse_num)] for _ in range(self.factory_num)]
+        ## Set Initial Inventory at every stock point
+        #i_list, j_list = np.nonzero(self.case.connections)
+        #for i, j in zip(i_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints],j_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints]):
+        #    self.INV[0, i]=0
+        #    self.INV[0, j]=0
+        #    self.TotalDemand[i,j]=0
+            
+        ## Set Initial Demand for Retailer to WH Connections only    
+        #source, destination = np.nonzero(self.case.connections)
+        #for retailer, customer in zip(source[-self.case.no_customers:],destination[-self.case.no_customers:]):
+        #    if self.case.demand_dist == 'poisson':
+        #       demand_mean = random.randrange(self.case.demand_lb,self.case.demand_ub + 1)
+        #        demand = np.random.poisson(demand_mean)
+        #    elif self.case.demand_dist == 'uniform':
+        #        demand = random.randrange(self.case.demand_lb,self.case.demand_ub + 1)
+        #    self.O[0, customer, retailer] = 0
+        
+        # All Backorders            
+        #i_list, j_list = np.nonzero(self.case.connections)
+        #for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
+        #    self.BO[0, j, i] = 0
+            
+        #All  Intransits and Deliveries
+        #i_list, j_list = np.nonzero(self.case.connections)
+        #for i, j in zip(i_list[:-self.case.no_customers], j_list[:-self.case.no_customers]):
+        #    self.in_transit[0, i, j] = 0
+        #    self.T[0, i, j] = 0 # Delivery made 
 
     def seed (self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -45,11 +74,11 @@ class InventoryEnv(gym.Env):
 
         Returns: Integer
         """
-        if self.dist == 'uniform':
-            self.leadtime = random.randrange(self.lowerbound, self.upperbound + 1)
+        if dist == 'uniform':
+            leadtime = random.randrange(lowerbound, upperbound + 1)
         else:
             raise Exception
-        return self.leadtime
+        return leadtime
 
     def determine_potential_actions(self):
         """
@@ -95,11 +124,25 @@ class InventoryEnv(gym.Env):
     def _initialize_state(self):
         """
         Initialize the inventory position for every node.
-
+        
         Copies the inventory position from the previous timestep.
+        
         """
-        #(...)
-        return None
+        
+        if self.t ==0:
+            print('t=0')
+            i_list, j_list = np.nonzero(self.case.connections)
+            for i, j in zip(i_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints],j_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints]):
+                self.INV[0, i]=0
+                self.INV[0, j]=0
+        else:
+            print('t!=0')
+            for i, j in zip(i_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints],j_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints]):
+                self.INV[t, i]=self.INV[t-1, i]
+                self.INV[t, j]=self.INV[t-1, j]
+                    #(...)
+        
+        #return None
 
     def _receive_incoming_delivery(self):
          """
@@ -112,7 +155,7 @@ class InventoryEnv(gym.Env):
          for i in range(0, self.case.no_stockpoints + self.case.no_suppliers):
          # Loop over all stockpoints
          # Note that only forward delivery is possible, hence 'i+1'
-             for j in range(i + 1, self.case.no_stockpoints +elf.case.no_suppliers):
+             for j in range(i + 1, self.case.no_stockpoints +self.case.no_suppliers):
                     delivery = self.T[0, i, j]
                     self.INV[0, j] += delivery
                     self.in_transit[0, i, j] -= delivery
@@ -154,7 +197,6 @@ class InventoryEnv(gym.Env):
                     else:
                         self._fulfill_order(i, j, inventory)
                         self.BO[0, j, i] -= inventory
-        
         
     def _recieve_incoming_orders_customers(self):
         i_list, j_list = np.nonzero(self.case.connections)
@@ -268,6 +310,7 @@ class InventoryEnv(gym.Env):
                         self._place_order(i,j,t,k, action, incomingOrders)
                         k += 1
                         break
+                        
     def _place_order(self, i, j, t, k, action, incomingOrders):
         if self.case.order_policy == 'X':
             self.O[t, j, i] += action[k]
@@ -299,7 +342,7 @@ class InventoryEnv(gym.Env):
             for i in range(len(action_clip)):
                 action_clip[i] = ((action_clip[i]-low[i])/(high[i]-low[i]))*((max[i]-min[i]))+min[i]
                 action = [np.round(num) for num in action_clip]
-        return action
+        return action,0
     
     def step(self, action, visualize=False):
         """
@@ -307,12 +350,15 @@ class InventoryEnv(gym.Env):
         
         input: actionlist, visualize
         """
-        self.leadtime = generate_leadtime(0, self.case.leadtime_dist,self.case.leadtime_lb, self.case.leadtime_ub)
+        self.leadtime = self.generate_leadtime(0, self.case.leadtime_dist,self.case.leadtime_lb, self.case.leadtime_ub)
+        print('Lead Time :',self.leadtime)
         action, penalty = self._check_action_space(action)
+        print('Action :',action)
         self._initialize_state()
         if visualize: self._visualize("0. IP")
         if self.case_name == "BeerGame" or self.case_name == "General":
             self._generate_demand()
+            print('1')
             self._receive_incoming_delivery()
             if visualize: self._visualize("1. Delivery")
             self._receive_incoming_orders()
@@ -341,4 +387,4 @@ class InventoryEnv(gym.Env):
         return CIP, -reward/self.case.divide, False
 
     def reset(self):
-         None
+        return self.state_low
