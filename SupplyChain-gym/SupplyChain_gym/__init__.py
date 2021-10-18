@@ -6,6 +6,11 @@ register(
 )
 
 register(
-    id="NetworkManagement-v0",
+    id="NetworkManagement-v1",
     entry_point="SupplyChain_gym.envs:NetInvMgmtBacklogEnv",
+)
+
+register(
+    id="NetworkManagement-v2",
+    entry_point="SupplyChain_gym.envs:NetInvMgmtLostSalesEnv",
 )
