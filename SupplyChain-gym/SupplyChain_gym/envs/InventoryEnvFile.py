@@ -27,6 +27,10 @@ class InventoryEnv(gym.Env):
         self.method = method
         self.t=0
         #self.n=0
+        self.seed_int = 0
+        self.num_of_periods=30
+        # set random generation seed (unless using user demands)
+        self.seed(self.seed_int)
         if self.method == 'DRL':
             self.action_low = action_low
             self.action_high = action_high
@@ -34,36 +38,10 @@ class InventoryEnv(gym.Env):
             self.action_max = action_max
             self.state_low = state_low
             self.state_high = state_high
+        
         self.determine_potential_actions()
         self.determine_potential_states()
         
-        self.seed_int = 0
-        self.num_of_periods=30
-        
-        
-        # set random generation seed (unless using user demands)
-        self.seed(self.seed_int)
-        
-        # initializetion
-        self.period = 0 # initialize time
-    
-        self.INV = [[0 for _ in range(self.case.no_nodes)] for _ in self.num_of_periods+10] #Inventory at each stock point
-        
-        self.BO = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in self.num_of_periods+10] #BackOrder for every i,j connection
-        
-        self.in_transit = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in self.num_of_periods+10] #Intrasnit for every i,j connection
-        
-        self.T = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in self.num_of_periods+10] #Delivery for every i,j connection
-        
-        self.O = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in self.num_of_periods] #Order for every i,j connection
-        
-        self.TotalFulfilled = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Fulfilled demand for every i,j connection
-        
-        self.TotalDemand = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Demand for every i,j connection
-        
-        self.TotalBO = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Backorders for every i,j connection
-        
-
     def seed(self,seed=None):
         '''
         Set random number generation seed
@@ -592,5 +570,32 @@ class InventoryEnv(gym.Env):
         return self.state, -reward/self.case.divide, done
 
     def reset(self):
+    
+        # initializetion
+        self.period = 0 # initialize time
+    
+        self.INV = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods+10)] #Inventory at each stock point
         
+        self.BO = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods+10)] #BackOrder for every i,j connection
+        
+        self.in_transit = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods+10)] #Intrasnit for every i,j connection
+        
+        self.T = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods+10)] #Delivery for every i,j connection
+        
+        self.O = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods)] #Order for every i,j connection
+        
+        self.TotalFulfilled = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Fulfilled demand for every i,j connection
+        
+        self.TotalDemand = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Demand for every i,j connection
+        
+        self.TotalBO = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Backorders for every i,j connection
+        
+        self.INV=np.array(self.INV)
+        self.BO=np.array(self.BO)
+        self.in_transit=np.array(self.in_transit)
+        self.T=np.array(self.T)
+        self.O=np.array(self.O)
+        self.TotalFulfilled=np.array(self.TotalFulfilled)
+        self.TotalDemand=np.array(self.TotalDemand)
+        self.TotalBO=np.array(self.TotalBO)
         return self.state_low
