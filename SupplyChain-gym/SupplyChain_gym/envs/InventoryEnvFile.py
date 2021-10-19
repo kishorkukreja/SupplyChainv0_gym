@@ -25,6 +25,8 @@ class InventoryEnv(gym.Env):
         self.fix = fix
         self.ipfix = ipfix
         self.method = method
+        self.t=0
+        #self.n=0
         if self.method == 'DRL':
             self.action_low = action_low
             self.action_high = action_high
@@ -34,39 +36,41 @@ class InventoryEnv(gym.Env):
             self.state_high = state_high
         self.determine_potential_actions()
         self.determine_potential_states()
-        #self.INV = [[0] for _ in range(self.case.no_stockpoints)]
-        #self.a_w = [[[] for _ in range(self.warehouse_num)] for _ in range(self.factory_num)]
-        ## Set Initial Inventory at every stock point
-        #i_list, j_list = np.nonzero(self.case.connections)
-        #for i, j in zip(i_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints],j_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints]):
-        #    self.INV[0, i]=0
-        #    self.INV[0, j]=0
-        #    self.TotalDemand[i,j]=0
-            
-        ## Set Initial Demand for Retailer to WH Connections only    
-        #source, destination = np.nonzero(self.case.connections)
-        #for retailer, customer in zip(source[-self.case.no_customers:],destination[-self.case.no_customers:]):
-        #    if self.case.demand_dist == 'poisson':
-        #       demand_mean = random.randrange(self.case.demand_lb,self.case.demand_ub + 1)
-        #        demand = np.random.poisson(demand_mean)
-        #    elif self.case.demand_dist == 'uniform':
-        #        demand = random.randrange(self.case.demand_lb,self.case.demand_ub + 1)
-        #    self.O[0, customer, retailer] = 0
         
-        # All Backorders            
-        #i_list, j_list = np.nonzero(self.case.connections)
-        #for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
-        #    self.BO[0, j, i] = 0
-            
-        #All  Intransits and Deliveries
-        #i_list, j_list = np.nonzero(self.case.connections)
-        #for i, j in zip(i_list[:-self.case.no_customers], j_list[:-self.case.no_customers]):
-        #    self.in_transit[0, i, j] = 0
-        #    self.T[0, i, j] = 0 # Delivery made 
+        self.seed_int = 0
+        self.num_of_periods=30
+        
+        
+        # set random generation seed (unless using user demands)
+        self.seed(self.seed_int)
+        
+        # initializetion
+        self.period = 0 # initialize time
+    
+        self.INV = [[0 for _ in range(self.case.no_nodes)] for _ in self.num_of_periods+10] #Inventory at each stock point
+        
+        self.BO = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in self.num_of_periods+10] #BackOrder for every i,j connection
+        
+        self.in_transit = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in self.num_of_periods+10] #Intrasnit for every i,j connection
+        
+        self.T = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in self.num_of_periods+10] #Delivery for every i,j connection
+        
+        self.O = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in self.num_of_periods] #Order for every i,j connection
+        
+        self.TotalFulfilled = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Fulfilled demand for every i,j connection
+        
+        self.TotalDemand = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Demand for every i,j connection
+        
+        self.TotalBO = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Backorders for every i,j connection
+        
 
-    def seed (self, seed=None):
-        self.np_random, seed = seeding.np_random(seed)
-        return [seed]
+    def seed(self,seed=None):
+        '''
+        Set random number generation seed
+        '''
+        # seed random state
+        if seed != None:
+            np.random.seed(seed=int(seed))
         
     def generate_leadtime(self,t, dist, lowerbound, upperbound):
         """
@@ -102,6 +106,7 @@ class InventoryEnv(gym.Env):
 
         Writes the demand to the orders table.
         """
+        t=self.period
         source, destination = np.nonzero(self.case.connections)
         for retailer, customer in zip(source[-self.case.no_customers:],destination[-self.case.no_customers:]):
             if self.case.demand_dist == 'poisson':
@@ -109,7 +114,7 @@ class InventoryEnv(gym.Env):
                 demand = np.random.poisson(demand_mean)
             elif self.case.demand_dist == 'uniform':
                 demand = random.randrange(self.case.demand_lb,self.case.demand_ub + 1)
-            self.O[0, customer, retailer] = demand
+            self.O[t, customer, retailer] = demand
 
     def calculate_reward(self):
         """
@@ -117,8 +122,9 @@ class InventoryEnv(gym.Env):
 
         Returns: holding costs, backorder costs
         """
-        backorder_costs = np.sum(self.BO[0] * self.case.bo_costs)
-        holding_costs = np.sum(self.INV[0] * self.case.holding_costs)
+        t=self.period
+        backorder_costs = np.sum(self.BO[t] * self.case.bo_costs)
+        holding_costs = np.sum(self.INV[t] * self.case.holding_costs)
         return holding_costs, backorder_costs
 
     def _initialize_state(self):
@@ -127,76 +133,247 @@ class InventoryEnv(gym.Env):
         
         Copies the inventory position from the previous timestep.
         
-        """
         
-        if self.t ==0:
-            print('t=0')
+        """
+        ##Inventory
+        
+        t=self.period
+        if t==0:
+            for i,j in enumerate(range(self.case.no_suppliers,self.case.no_nodes-self.case.no_customers)):
+                self.INV[0,j]=self.case.state_high[2+i:2+i+1][0]/2 ##set initial inventory as half of overall inventory 
+                
+            ##BackOrders ##Initial Backorder=0
             i_list, j_list = np.nonzero(self.case.connections)
-            for i, j in zip(i_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints],j_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints]):
-                self.INV[0, i]=0
-                self.INV[0, j]=0
-        else:
-            print('t!=0')
-            for i, j in zip(i_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints],j_list[self.case.no_suppliers:self.case.no_suppliers+self.case.no_stockpoints]):
-                self.INV[t, i]=self.INV[t-1, i]
-                self.INV[t, j]=self.INV[t-1, j]
-                    #(...)
+            for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
+                    self.BO[0, j, i]=0        
+              
+            ##Intransit ##Initial Intransit=0  
+            i_list, j_list = np.nonzero(self.case.connections)
+            for i, j in zip(i_list[:-self.case.no_customers], j_list[:-self.case.no_customers]):
+                    self.in_transit[0, i, j]=0
+            
+            
+            # initial inventory#self.case.no_stockpoints
+        #self.Y.loc[0,:]=np.zeros(PS) # initial pipeline inventory
+        #self.action_log = np.zeros([T, PS])
+
+        # set state
+        self._update_state()
         
         #return None
+    
+    def _update_state(self):
+        # State is a concatenation of demand, inventory, and pipeline at each time step
+        #demand = np.hstack([self.D[d].iloc[self.period] for d in self.retail_links])
+        t=self.period
+        if self.period == 0:
+        
+            ##inventory
+            inventory = np.hstack([self.INV[0,j] for j in range(self.case.no_suppliers,self.case.no_nodes-self.case.no_customers)])
+            tot_inventory=np.stack(np.sum(inventory))
+            #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
+            
+            ##Backorders
+            # All Backorders     
+            bo=[]
+            i_list, j_list = np.nonzero(self.case.connections)
+            for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
+                bo.append(self.BO[0, j, i])
+            bo=np.hstack(bo)
+            tot_bo=np.stack(np.sum(bo))
+            
+            
+            ##Backorders
+            # All Backorders     
+            it=[]
+            i_list, j_list = np.nonzero(self.case.connections)
+            for i, j in zip(i_list[:-self.case.no_customers], j_list[:-self.case.no_customers]):
+                it.append(self.in_transit[0, i, j])
+            it=np.hstack(it)
+        
+        else:
+            ##inventory
+            inventory = np.hstack([self.INV[t-1,j] for j in range(self.case.no_suppliers,self.case.no_nodes-self.case.no_customers)])
+            
+            tot_inventory=np.stack(np.sum(inventory))
+            #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
+            
+            ##Backorders
+            # All Backorders     
+            bo=[]
+            i_list, j_list = np.nonzero(self.case.connections)
+            for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
+                bo.append(self.BO[t-1, j, i])
+            bo=np.hstack(bo)
+            tot_bo=np.stack(np.sum(bo))
+            
+            
+            ##Backorders
+            # All Backorders     
+            it=[]
+            i_list, j_list = np.nonzero(self.case.connections)
+            for i, j in zip(i_list[:-self.case.no_customers], j_list[:-self.case.no_customers]):
+                it.append(self.in_transit[t-1, i, j])
+            it=np.hstack(it)
+        
+        
+        # Pipeline values won't be of proper dimension if current
+        # current period < lead time. We need to add 0's as padding.
+        # if self.period == 0:
+        #     _pipeline = [[self.Y[k].iloc[0]]
+        #         for k, v in self.lead_times.items()]
+        # else:
+        #     _pipeline = [self.Y[k].iloc[max(self.period-v,0):self.period].values
+        #         for k, v in self.lead_times.items()]
+        # pipeline = []
+        # for p, v in zip(_pipeline, self.lead_times.values()):
+        #     if v == 0:
+        #         continue
+        #     if len(p) <= v:
+        #         pipe = np.zeros(v)
+        #         pipe[-len(p):] += p
+        #     pipeline.append(pipe)
+        # pipeline = np.hstack(pipeline)
+        # 
+        
+        self.state = np.hstack([tot_inventory,tot_bo, inventory, bo,it]) ## 1,1,9,19,18 dimensions
 
     def _receive_incoming_delivery(self):
-         """
-         Receives the incoming delivery for every stockpoint.
+        t=self.period
+        # # Loop over all suppliers and stockpoints
+        # for i in range(0, self.case.no_stockpoints + self.case.no_suppliers):
+        # # Loop over all stockpoints
+        # # Note that only forward delivery is possible, hence 'i+1'
+            # for j in range(i + 1, self.case.no_stockpoints +self.case.no_suppliers):
+                   # delivery = self.T[0, i, j]
+                   # self.INV[0, j] += delivery
+                   # self.in_transit[0, i, j] -= delivery
+                   # self.T[0, i, j] = 0
+        # Loop over all suppliers and stockpoints
+        for i in range(0, self.case.no_stockpoints + self.case.no_suppliers):
+        # Loop over all stockpoints
+        # Note that only forward delivery is possible, hence 'i+1'
+            for j in range(i + 1, self.case.no_stockpoints +self.case.no_suppliers):
+                   delivery = self.T[t, i, j] ## all deliveries for current time step 
+                   self.INV[t, j] += delivery
+                   self.in_transit[t, i, j] -= delivery
+                   self.T[t, i, j] = 0
 
-         Customers are not taken into account because of zero lead time
-         Based on the amount stated in T
-         """
-         # Loop over all suppliers and stockpoints
-         for i in range(0, self.case.no_stockpoints + self.case.no_suppliers):
-         # Loop over all stockpoints
-         # Note that only forward delivery is possible, hence 'i+1'
-             for j in range(i + 1, self.case.no_stockpoints +self.case.no_suppliers):
-                    delivery = self.T[0, i, j]
-                    self.INV[0, j] += delivery
-                    self.in_transit[0, i, j] -= delivery
-                    self.T[0, i, j] = 0
-
-    def _recieve_incoming_orders_customers(self):
-        i_list, j_list = np.nonzero(self.case.connections)
-        for i, j in zip(i_list[-self.case.no_customers:], j_list[-self.case.no_customers:]):
-            if self.O[0, j, i] > 0:
-                # Check if the current order can be fulfilled
-                if self.INV[0, i] >= self.O[0, j, i]:
-                    self._fulfill_order(i, j, self.O[0, j, i])
-                    # Else, fulfill as far as possible
-                else:
-                    inventory = max(self.INV[0, i], 0)
-                    quantity = self.O[0, j, i] - inventory
-                    self._fulfill_order(i, j, inventory)
-                    # Add to backorder if applicable
-                    if self.case.unsatisfied_demand == 'backorders':
-                        self.BO[0, j, i] += quantity
+    def _receive_incoming_orders(self):
+    # # Loop over every stockpoint
+        # for i in range(self.case.no_stockpoints + self.case.no_suppliers):
+            # # Check if the inventory is larger than all incoming orders
+            # if self.INV[0, i] >= np.sum(self.O[0, :, i], 0):
+                # for j in np.nonzero(self.case.connections[i])[0]:
+                    # if self.O[0, j, i] > 0:
+                        # self._fulfill_order(i, j, self.O[0, j, i])
+                            # if self.t >= self.case.warmup:
+                                # self.TotalFulfilled[j,i] += self.O[0,j,i]
+            # else:
+                # IPlist = {}
+                # # Generate a list of stockpoints that have outstanding orders
+                # k_list = np.nonzero(self.O[0, :, i])[0]
+                # bo_echelon = np.sum(self.BO[0], 0)
+                # for k in k_list:
+                # IPlist[k] = self.INV[0, k] - bo_echelon[k]
+                # # Check the lowest inventory position and sort these on lowest IP
+                # sorted_IP = {k: v for k, v in sorted(IPlist.items(), key=lambda item: item[1])}
+                # for j in sorted_IP:
+                    # inventory = self.INV[0, i]
+                    # # Check if the remaining order can be fulfilled completely
+                    # if inventory >= self.O[0, j, i]:
+                        # self._fulfill_order(i, j, self.O[0, j, i])
+                            # if self.t >= self.case.warmup:
+                                # self.TotalFulfilled[j,i] += self.O[0,j,i]
+                    # else:
+                        # # Else, fulfill how far possible
+                        # quantity = self.O[0, j, i] - inventory
+                        # self._fulfill_order(i, j, inventory)
+                        # if self.t >= self.case.warmup:
+                            # self.TotalFulfilled[j,i] += inventory
+                        # if self.case.unsatisfied_demand == 'backorders':
+                            # self.BO[0, j, i] += quantity
+                            # if self.t >= self.case.warmup:
+                                # self.TotalBO[j,i] += quantity
+        # if self.case.unsatisfied_demand == 'backorders':
+            # i_list, j_list = np.nonzero(self.case.connections)
+            # for i, j in zip(i_list, j_list):
+                # inventory = self.INV[0, i]
+                # # If there are any backorders, fulfill them afterwards
+                # if inventory > 0:
+                # # If the inventory is larger than the backorder
+                # # Fulfill the whole backorder
+                # backorder = self.BO[0, j, i]
+                # if inventory >= backorder:
+                    # if self.fix:
+                        # self._fulfill_order(i, j, backorder)
+                    # else:
+                        # self.INV[0, i] -= backorder
+                    # self.BO[0, j, i] = 0
+                # # Else, fulfill the entire inventory
+                # else:
+                    # self._fulfill_order(i, j, inventory)
+                    # self.BO[0, j, i] -= inventory
+                    
+        t=self.period         
+        self.t=self.period         
+        
+        # Loop over every stockpoint
+        for i in range(self.case.no_stockpoints + self.case.no_suppliers):
+            # Check if the inventory is larger than all incoming orders
+            if self.INV[t, i] >= np.sum(self.O[t, :, i], 0): ##big inventory
+                for j in np.nonzero(self.case.connections[i])[0]:
+                    if self.O[t, j, i] > 0:
+                        self._fulfill_order(i, j, self.O[t, j, i])
+                        if self.t >= self.case.warmup:
+                            self.TotalFulfilled[j,i] += self.O[t,j,i]
+            else:
+                IPlist = {}
+                # Generate a list of stockpoints that have outstanding orders
+                k_list = np.nonzero(self.O[t, :, i])[0]
+                bo_echelon = np.sum(self.BO[t], 0)
+                for k in k_list:
+                    IPlist[k] = self.INV[t, k] - bo_echelon[k]
+                    # Check the lowest inventory position and sort these on lowest IP
+                    sorted_IP = {k: v for k, v in sorted(IPlist.items(), key=lambda item: item[1])}
+                    for j in sorted_IP:
+                        inventory = self.INV[t, i]
+                        # Check if the remaining order can be fulfilled completely
+                        if inventory >= self.O[t, j, i]:
+                            self._fulfill_order(i, j, self.O[t, j, i])
+                            if self.t >= self.case.warmup:
+                                self.TotalFulfilled[j,i] += self.O[t,j,i]
+                        else:
+                            # Else, fulfill how far possible
+                            quantity = self.O[t, j, i] - inventory
+                            self._fulfill_order(i, j, inventory)
+                            if self.t >= self.case.warmup:
+                                self.TotalFulfilled[j,i] += inventory
+                            if self.case.unsatisfied_demand == 'backorders':
+                                self.BO[t, j, i] += quantity
+                                if self.t >= self.case.warmup:
+                                    self.TotalBO[j,i] += quantity
+                                    
+                                    
         if self.case.unsatisfied_demand == 'backorders':
-            for i, j in zip(i_list[-self.case.no_customers:], j_list[-self.case.no_customers:]):
-                inventory = self.INV[0, i]
+            i_list, j_list = np.nonzero(self.case.connections)
+            for i, j in zip(i_list, j_list):
+                inventory = self.INV[t, i]
                 # If there are any backorders, fulfill them afterwards
                 if inventory > 0:
-                    # If the inventory is larger than the backorder
-                    # Fulfill the whole backorder
-                    backorder = self.BO[0, j, i]
+                # If the inventory is larger than the backorder
+                # Fulfill the whole backorder
+                    backorder = self.BO[t, j, i]
                     if inventory >= backorder:
-                        # Dit vind ik heel onlogisch, maar voorzover ik nu kan zien
-                        # in de IPs komt de backorder nooit aan.
-                        # Nu wel gedaan dmv fix
                         if self.fix:
                             self._fulfill_order(i, j, backorder)
                         else:
-                            self.INV[0, i] -= backorder
-                        self.BO[0, j, i] = 0
+                            self.INV[t, i] -= backorder
+                        self.BO[t, j, i] = 0
                     # Else, fulfill the entire inventory
                     else:
                         self._fulfill_order(i, j, inventory)
-                        self.BO[0, j, i] -= inventory
+                        self.BO[t, j, i] -= inventory
         
     def _recieve_incoming_orders_customers(self):
         i_list, j_list = np.nonzero(self.case.connections)
@@ -270,31 +447,35 @@ class InventoryEnv(gym.Env):
                     
     def _fulfill_order(self, source, destination, quantity):
         # Customers don't have any lead time.
+        t=self.period
+        
         if destination >= self.case.no_nodes - self.case.no_customers:
             leadtime = 0
         else:
             leadtime = self.leadtime
         # The order is fulfilled immediately for the customer
         # or whenever the leadtime is 0
+        
         if leadtime == 0:
         # The new inventorylevel is increased with the shipped quantity
-            self.INV[0, destination] += quantity
+            self.INV[t, destination] += quantity
         else:
             # If the order is not fulfilled immediately, denote the time when
             # the order will be delivered. This can not be larger than the horizon
             if leadtime < self.n:
-                self.T[leadtime, source, destination] += quantity
+                self.T[t+leadtime, source, destination] += quantity
             else:
                 raise NotImplementedError
                 for k in range(0, min(leadtime, self.n) + 1):
-                    self.in_transit[k, source, destination] += quantity
+                    self.in_transit[t+k, source, destination] += quantity
         # Suppliers have unlimited capacity
         if source >= self.case.no_suppliers:
-            self.INV[0, source] -= quantity
+            self.INV[t, source] -= quantity
             
     def _place_outgoing_order(self, t, action):
         k = 0
-        incomingOrders = np.sum(self.O[0], 0)
+        
+        incomingOrders = np.sum(self.O[t-1], 0)
         # Loop over all suppliers and stockpoints
         for j in range(self.case.no_suppliers, self.case.no_stockpoints +
             self.case.no_suppliers):
@@ -312,14 +493,19 @@ class InventoryEnv(gym.Env):
                         break
                         
     def _place_order(self, i, j, t, k, action, incomingOrders):
+        
+        self.t=self.period
+        
         if self.case.order_policy == 'X':
             self.O[t, j, i] += action[k]
             if (self.t < self.case.horizon - 1) and (self.t >= self.case.warmup-1):
                 self.TotalDemand[j,i] += action[k]
+        
         elif self.case.order_policy == 'X+Y':
             self.O[t, j, i] += incomingOrders[j] + action[k]
             if (self.t < self.case.horizon - 1) and (self.t >= self.case.warmup-1):
                 self.TotalDemand[j,i] += incomingOrders[j] + action[k]
+        
         elif self.case.order_policy == 'BaseStock':
             bo_echelon = np.sum(self.BO[0], 0)
             self.O[t, j, i] += max(0, action[k]-(self.INV[0,j]+self.in_transit[0,i,j]-bo_echelon[j]))
@@ -356,14 +542,17 @@ class InventoryEnv(gym.Env):
         print('Action :',action)
         self._initialize_state()
         if visualize: self._visualize("0. IP")
+        
+
         if self.case_name == "BeerGame" or self.case_name == "General":
-            self._generate_demand()
+            self._generate_demand() ## order from customer to retail i.e. last leg
             print('1')
             self._receive_incoming_delivery()
             if visualize: self._visualize("1. Delivery")
             self._receive_incoming_orders()
             if visualize: self._visualize("2. Demand")
-            self._place_outgoing_order(1, action)
+            #self._place_outgoing_order(1, action)
+            self._place_outgoing_order(self.period+1, action)
         elif self.case_name == "Divergent":
             # According to the paper:
             # (1) Warehouse places order to external supplier
@@ -381,10 +570,27 @@ class InventoryEnv(gym.Env):
             if visualize: self._visualize("4. Demand")
         else:
             raise NotImplementedError
-        CIP = self._code_state()
+            
+        # update period
+        self.period += 1
+        
+        # determine if simulation should terminate
+        if self.period >= self.num_periods:
+            done = True
+        else:
+            done = False
+            # update stae
+            self._update_state()
+        # CIP is next state
+        
+        #CIP = self._code_state()
         holding_costs, backorder_costs = self.calculate_reward()
         reward = holding_costs + backorder_costs + penalty
-        return CIP, -reward/self.case.divide, False
+        
+        
+        
+        return self.state, -reward/self.case.divide, done
 
     def reset(self):
+        
         return self.state_low
