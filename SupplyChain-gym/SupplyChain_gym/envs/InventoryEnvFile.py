@@ -148,7 +148,7 @@ class InventoryEnv(gym.Env):
         
             ##inventory
             inventory = np.hstack([self.INV[0,j] for j in range(self.case.no_suppliers,self.case.no_nodes-self.case.no_customers)])
-            tot_inventory=np.stack(np.sum(inventory))
+            tot_inventory=np.array(np.sum(inventory))
             #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
             
             ##Backorders
@@ -158,7 +158,7 @@ class InventoryEnv(gym.Env):
             for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
                 bo.append(self.BO[0, j, i])
             bo=np.hstack(bo)
-            tot_bo=np.stack(np.sum(bo))
+            tot_bo=np.array(np.sum(bo))
             
             
             ##Backorders
@@ -173,7 +173,7 @@ class InventoryEnv(gym.Env):
             ##inventory
             inventory = np.hstack([self.INV[t-1,j] for j in range(self.case.no_suppliers,self.case.no_nodes-self.case.no_customers)])
             
-            tot_inventory=np.stack(np.sum(inventory))
+            tot_inventory=np.array(np.sum(inventory))
             #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
             
             ##Backorders
@@ -183,7 +183,7 @@ class InventoryEnv(gym.Env):
             for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
                 bo.append(self.BO[t-1, j, i])
             bo=np.hstack(bo)
-            tot_bo=np.stack(np.sum(bo))
+            tot_bo=np.array(np.sum(bo))
             
             
             ##Backorders
@@ -553,7 +553,7 @@ class InventoryEnv(gym.Env):
         self.period += 1
         
         # determine if simulation should terminate
-        if self.period >= self.num_periods:
+        if self.period >= self.num_of_periods:
             done = True
         else:
             done = False
@@ -567,7 +567,7 @@ class InventoryEnv(gym.Env):
         
         
         
-        return self.state, -reward/self.case.divide, done
+        return self.state, -reward/self.case.divide, done,{}
 
     def reset(self):
     
@@ -582,7 +582,7 @@ class InventoryEnv(gym.Env):
         
         self.T = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods+10)] #Delivery for every i,j connection
         
-        self.O = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods)] #Order for every i,j connection
+        self.O = [[[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods+10)] #Order for every i,j connection
         
         self.TotalFulfilled = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Fulfilled demand for every i,j connection
         
