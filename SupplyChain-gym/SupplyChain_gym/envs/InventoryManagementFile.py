@@ -152,8 +152,7 @@ class InvManagementMasterEnv(gym.Env):
         if self.dist < 5:
             self.seed(self.seed_int)
 
-        # intialize
-        self.reset()
+        
         
         # action space (reorder quantities for each stage; list)
         # An action is defined for every stage (except last one)
@@ -161,7 +160,7 @@ class InvManagementMasterEnv(gym.Env):
             # [gym.spaces.Box(0, i, shape=(1,)) for i in self.supply_capacity]))
         self.pipeline_length = (m-1)*(lt_max+1)
         self.action_space = gym.spaces.Box(
-            low=np.zeros(m-1), high=self.supply_capacity, dtype=np.int16)
+            low=np.zeros(m-1), high=np.ones(len(self.supply_capacity))*np.max(self.supply_capacity)*self.num_periods, dtype=np.int32)
         # observation space (Inventory position at each echelon, which is any integer value)
         self.observation_space = gym.spaces.Box(
             low=-np.ones(self.pipeline_length)*self.supply_capacity.max()*self.num_periods*10,
@@ -170,6 +169,9 @@ class InvManagementMasterEnv(gym.Env):
         # self.observation_space = gym.spaces.Box(
         #     low=-np.ones(m-1)*self.supply_capacity.max()*self.num_periods*10, 
         #     high=self.supply_capacity*self.num_periods, dtype=np.int32)
+        
+        # intialize
+        self.reset()
 
     def seed(self,seed=None):
         '''
