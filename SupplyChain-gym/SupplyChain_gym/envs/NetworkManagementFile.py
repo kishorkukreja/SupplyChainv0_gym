@@ -97,7 +97,7 @@ class NetInvMgmtMasterEnv(gym.Env):
         self.user_D = {(1,0): np.zeros(self.num_periods)}
         self.sample_path = {(1,0): False}
         self._max_rewards = 2000
-
+        self.retailer_array=[1]
         # create graph
         self.graph = nx.DiGraph()
         # Market 
@@ -183,9 +183,11 @@ class NetInvMgmtMasterEnv(gym.Env):
         
         self.num_nodes = self.graph.number_of_nodes()
         self.adjacency_matrix = np.vstack(self.graph.edges())
+        # Retaiiler Nodes
+        
         # Set node levels
         self.levels = {}
-        self.levels['retailer'] = np.array([1])
+        self.levels['retailer'] = np.array(self.retailer_array)
         self.levels['distributor'] = np.unique(np.hstack(
             [list(self.graph.predecessors(i)) for i in self.levels['retailer']]))
         self.levels['manufacturer'] = np.unique(np.hstack(
@@ -367,6 +369,7 @@ class NetInvMgmtMasterEnv(gym.Env):
                                                         except market nodes)
         '''
         t = self.period
+        print('-----------------------Period-------------------',t)
         if type(action) != dict: # convert to dict if a list was given
             action = {key: action[i] for i, key in enumerate(self.reorder_links)}
         
@@ -414,22 +417,23 @@ class NetInvMgmtMasterEnv(gym.Env):
         for j in self.retail:
             for k in self.market:
                 #read user specified demand. if all zeros, use demand_dist instead.
-                Demand = self.graph.edges[(j,k)]['user_D']
-                if np.sum(Demand) > 0:
-                    self.D.loc[t,(j,k)] = Demand[t]
-                else:
-                    Demand = self.graph.edges[(j,k)]['demand_dist']
-                    self.D.loc[t,(j,k)] = Demand.rvs(
-                        **self.graph.edges[(j,k)]['dist_param'])
-                if self.backlog and t >= 1:
-                    D = self.D.loc[t,(j,k)] + self.U.loc[t-1,(j,k)]
-                else:
-                    D = self.D.loc[t,(j,k)]
+                if self.graph.has_edge(j,k):
+                    Demand = self.graph.edges[(j,k)]['user_D']
+                    if np.sum(Demand) > 0:
+                        self.D.loc[t,(j,k)] = Demand[t]
+                    else:
+                        Demand = self.graph.edges[(j,k)]['demand_dist']
+                        self.D.loc[t,(j,k)] = Demand.rvs(
+                            **self.graph.edges[(j,k)]['dist_param'])
+                    if self.backlog and t >= 1:
+                        D = self.D.loc[t,(j,k)] + self.U.loc[t-1,(j,k)]
+                    else:
+                        D = self.D.loc[t,(j,k)]
                 #satisfy demand up to available level
-                X_retail = self.X.loc[t+1,j] #get inventory at retail before demand was realized
-                self.S.loc[t,(j,k)] = min(D, X_retail) #perform sale
-                self.X.loc[t+1,j] -= self.S.loc[t,(j,k)] #update inventory
-                self.U.loc[t,(j,k)] = D - self.S.loc[t,(j,k)] #update unfulfilled orders
+                    X_retail = self.X.loc[t+1,j] #get inventory at retail before demand was realized
+                    self.S.loc[t,(j,k)] = min(D, X_retail) #perform sale
+                    self.X.loc[t+1,j] -= self.S.loc[t,(j,k)] #update inventory
+                    self.U.loc[t,(j,k)] = D - self.S.loc[t,(j,k)] #update unfulfilled orders
 
         # calculate profit
         for j in self.main_nodes:
