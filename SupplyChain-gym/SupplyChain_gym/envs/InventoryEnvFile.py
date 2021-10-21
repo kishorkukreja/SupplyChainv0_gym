@@ -31,6 +31,9 @@ class InventoryEnv(gym.Env):
         self.num_of_periods=self.case.num_of_periods
         # set random generation seed (unless using user demands)
         self.seed(self.seed_int)
+        self.cost_price=self.case.cost_price
+        self.selling_price=self.case.selling_price
+        self.num=0
         if self.method == 'DRL':
             self.action_low = action_low
             self.action_high = action_high
@@ -102,12 +105,27 @@ class InventoryEnv(gym.Env):
         Returns: holding costs, backorder costs
         """
         t=self.period
-        print('Inventory State:',np.array(self.INV[t]))
-        print('Back order State:',np.array(self.BO[t]))
+        #print('Back order State:',np.array(self.BO[t]))
         backorder_costs = np.sum(np.array(self.BO[t]) * np.array(self.case.bo_costs))
         hc=self.case.holding_costs
         holding_costs = np.sum(np.array(self.INV[t]) * np.array(hc))
-        return holding_costs, backorder_costs
+        revenue=np.sum(np.array(self.TotalSales[t]) * np.array(self.selling_price))
+        cost_of_goods=np.sum(np.array(self.TotalCOGS[t]) * np.array(self.cost_price))
+        #self.cost_price=self.case.cost_price
+        #self.selling_price=self.case.selling_price
+        
+        ## Penalty applying
+        if t>0:
+            if np.sum(np.array(self.BO[t]))>np.sum(np.array(self.BO[t-1])):
+                backorder_costs=backorder_costs*(t+1/t)
+            if np.sum(np.array(self.INV[t]))>np.sum(np.array(self.INV[t-1])):
+                holding_costs=holding_costs*(t+1/t)
+        else:
+            backorder_costs=backorder_costs
+            holding_costs=holding_costs
+        
+        
+        return holding_costs, backorder_costs,revenue,cost_of_goods
 
     def _initialize_state(self):
         """
@@ -197,7 +215,7 @@ class InventoryEnv(gym.Env):
             it=[]
             i_list, j_list = np.nonzero(self.case.connections)
             for i, j in zip(i_list[:-self.case.no_customers], j_list[:-self.case.no_customers]):
-                it.append(self.in_transit[t-1, i, j])
+                it.append(self.in_transit[t, i, j])
             it=np.hstack(it)
             
             
@@ -208,9 +226,9 @@ class InventoryEnv(gym.Env):
                 
                 
             ## for next time period copy the value of Back orders from previous time period     
-            #i_list, j_list = np.nonzero(self.case.connections)
-            #for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
-            #    self.BO[t, j, i]=self.BO[t-1, j, i]
+            i_list, j_list = np.nonzero(self.case.connections)
+            for i, j in zip(i_list[self.case.no_suppliers:], j_list[self.case.no_suppliers:]):
+                self.BO[t, j, i]=self.BO[t-1, j, i]
             
             ## for next time period copy the value of Intransit from previous time period     
             #i_list, j_list = np.nonzero(self.case.connections)
@@ -321,8 +339,10 @@ class InventoryEnv(gym.Env):
                     # self.BO[0, j, i] -= inventory
                     
         t=self.period         
-        self.t=self.period         
-        
+        self.t=self.period  
+        tmp=np.array(self.case.stockpoints_echelon)        
+        tmp1=np.sum(tmp[:-2]) ## since last layer is retailer and its previous is WH
+        #self.num=self.case.stock ## i greater than 8 
         # Loop over every stockpoint
         for i in range(self.case.no_stockpoints + self.case.no_suppliers):
             # Check if the inventory is larger than all incoming orders
@@ -333,6 +353,10 @@ class InventoryEnv(gym.Env):
                 for j in np.nonzero(self.case.connections[i])[0]:
                     if self.O[t, j, i] > 0:
                         self._fulfill_order(i, j, self.O[t, j, i])
+                        if i <= self.case.no_nodes - self.case.no_customers and i >= tmp1:
+                            self.TotalSales[t,i]+=self.O[t, j, i]
+                        if i <= self.case.no_suppliers:
+                            self.TotalCOGS[t,i]+=self.O[t, j, i]
                         print(f'Outer Loop - Inventory from {i} to {j} of quantity {self.O[t, j, i]}')
                         if self.t >= self.case.warmup:
                             self.TotalFulfilled[j,i] += self.O[t,j,i]
@@ -351,6 +375,10 @@ class InventoryEnv(gym.Env):
                         # Check if the remaining order can be fulfilled completely
                         if inventory >= self.O[t, j, i]:
                             self._fulfill_order(i, j, self.O[t, j, i])
+                            if i <= self.case.no_nodes - self.case.no_customers and i >= tmp1:
+                                self.TotalSales[t,i]+=self.O[t, j, i]
+                            if i <= self.case.no_suppliers:
+                                self.TotalCOGS[t,i]+=self.O[t, j, i]
                             print(f'Inventory from {i} to {j} of quantity {self.O[t, j, i]}')
                             if self.t >= self.case.warmup:
                                 self.TotalFulfilled[j,i] += self.O[t,j,i]
@@ -358,6 +386,10 @@ class InventoryEnv(gym.Env):
                             # Else, fulfill how far possible
                             quantity = self.O[t, j, i] - inventory
                             self._fulfill_order(i, j, inventory)
+                            if i <= self.case.no_nodes - self.case.no_customers and i >= tmp1:
+                                self.TotalSales[t,i]+=inventory
+                            if i <= self.case.no_suppliers:
+                                self.TotalCOGS[t,i]+=inventory
                             print(f'After 1st else Inventory from {i} to {j} of quantity {inventory}')
                             if self.t >= self.case.warmup:
                                 self.TotalFulfilled[j,i] += inventory
@@ -366,8 +398,8 @@ class InventoryEnv(gym.Env):
                                 print(f'After 1st else Backorder from {j} to {i} of quantity {quantity}')
                                 if self.t >= self.case.warmup:
                                     self.TotalBO[j,i] += quantity
-                                    
-                                    
+            print('COGS for Node',self.TotalCOGS[t,i])                         
+            print('Sales for Node',self.TotalSales[t,i])                      
         if self.case.unsatisfied_demand == 'backorders':
             i_list, j_list = np.nonzero(self.case.connections)
             for i, j in zip(i_list, j_list):
@@ -380,6 +412,10 @@ class InventoryEnv(gym.Env):
                     if inventory >= backorder:
                         if self.fix:
                             self._fulfill_order(i, j, backorder)
+                            if i <= self.case.no_nodes - self.case.no_customers and i >= tmp1:
+                                self.TotalSales[t,i]+=backorder
+                            if i <= self.case.no_suppliers:
+                                self.TotalCOGS[t,i]+=backorder
                             print(f'Outer if Inventory from {i} to {j} of quantity {backorder}')
                         else:
                             self.INV[t, i] -= backorder
@@ -388,9 +424,15 @@ class InventoryEnv(gym.Env):
                     # Else, fulfill the entire inventory
                     else:
                         self._fulfill_order(i, j, inventory)
+                        if i <= self.case.no_nodes - self.case.no_customers and i >= tmp1:
+                                self.TotalSales[t,i]+=inventory
+                        if i <= self.case.no_suppliers:
+                                self.TotalCOGS[t,i]+=inventory
                         print(f'Outer if else Inventory from {i} to {j} of quantity {inventory}')
                         self.BO[t, j, i] -= inventory
                         #print(f'Backorder from {j} to {i} of quantity {quantity}')
+                #print('COGS for Node',self.TotalCOGS[t,i])                         
+                #print('Sales for Node',self.TotalSales[t,i])   
         
     def _recieve_incoming_orders_customers(self):
         i_list, j_list = np.nonzero(self.case.connections)
@@ -551,9 +593,9 @@ class InventoryEnv(gym.Env):
             max = self.action_max
             min = self.action_min
             action_clip = np.clip(action, low, high)
-            #for i in range(len(action_clip)):
-            #    action_clip[i] = ((action_clip[i]-low[i])/(high[i]-low[i]))*((max[i]-min[i]))+min[i]
-            action = [np.round(num) for num in action_clip]
+            for i in range(len(action_clip)):
+                action_clip[i] = ((action_clip[i]-low[i])/(high[i]-low[i]))*((max[i]-min[i]))+min[i]
+                action = [np.round(num) for num in action_clip]
         return action,0.0
     
     def step(self, action, visualize=False):
@@ -567,8 +609,9 @@ class InventoryEnv(gym.Env):
         action, penalty = self._check_action_space(action)
         
         self._initialize_state()
+        
         print('Action :',action)
-        print('State :',self.state)
+        print('State at start :',self.state)
         if visualize: self._visualize("0. IP")
         
         
@@ -600,8 +643,8 @@ class InventoryEnv(gym.Env):
             raise NotImplementedError
             
         #CIP = self._code_state()
-        holding_costs, backorder_costs = self.calculate_reward()
-        reward = holding_costs + backorder_costs + penalty
+        holding_costs, backorder_costs,revenue,cost_of_goods = self.calculate_reward()
+        reward = revenue-(cost_of_goods+holding_costs + backorder_costs + penalty )
             
         # update period
         self.period += 1
@@ -614,14 +657,14 @@ class InventoryEnv(gym.Env):
             # update stae
             #self._update_state()
         # CIP is next state
-        
-        
+        print('Revenue :',revenue)
+        print('COGS :',cost_of_goods)
         print('Holding Costs :',holding_costs)
         print('Back Order Costs :',backorder_costs)
         print('Reward :',reward)
         
         
-        return self.state, -reward/self.case.divide, done,{}
+        return self.state, reward/self.case.divide, done,{}
 
     def reset(self):
     
@@ -644,6 +687,9 @@ class InventoryEnv(gym.Env):
         
         self.TotalBO = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.case.no_nodes)] #Total Backorders for every i,j connection
         
+        self.TotalSales = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods+10)] #Inventory at each stock point
+        self.TotalCOGS = [[0 for _ in range(self.case.no_nodes)] for _ in range(self.num_of_periods+10)] #Inventory at each stock point
+        
         self.INV=np.array(self.INV)
         self.BO=np.array(self.BO)
         self.in_transit=np.array(self.in_transit)
@@ -652,4 +698,6 @@ class InventoryEnv(gym.Env):
         self.TotalFulfilled=np.array(self.TotalFulfilled)
         self.TotalDemand=np.array(self.TotalDemand)
         self.TotalBO=np.array(self.TotalBO)
+        self.TotalSales=np.array(self.TotalSales)
+        self.TotalCOGS=np.array(self.TotalCOGS)
         return self.state_low
