@@ -110,8 +110,10 @@ class InventoryEnv(gym.Env):
         self.unsatisfied_demand = 'backorders'
         # Holding costs per stockpoint # for both warehouse and plants
         self.holding_costs = [0, 0, 0, 0, 7, 7, 7, 7, 10, 10, 10, 10, 10, 0, 0, 0, 0, 0]
+        self.initial_inventory = [1000000, 0, 0, 0, 0, 0, 0, 0]
         # Backorder costs per stockpoint #only for WHs here
         self.bo_costs = [0, 0, 0, 0, 0, 0, 0, 0, 13, 13, 13, 13, 13, 0, 0, 0, 0, 0]
+        self.lo_costs = [0, 0, 0, 0, 0, 0, 0, 0, 13, 13, 13, 13, 13, 0, 0, 0, 0, 0]
         # Demand distribution, can be either 'poisson' or 'uniform'
         self.demand_dist = 'poisson'
         # Lower bound of the demand distribution
@@ -134,11 +136,13 @@ class InventoryEnv(gym.Env):
         self.horizon = 75
         self.warmup = 50
         self.divide = 1000
-        self.coded = False,
-        self.fix = True,
-        self.ipfix = True,
-        self.n = 10,#self.leadtime_ub + 1,
-        self.leadtime=1,
+        self.coded = False
+        self.fix = True
+        self.ipfix = True
+        self.method = 'DRL'
+        self.n = 10 #self.leadtime_ub + 1,
+        self.leadtime=1
+        
         self.action_low = np.array([-5,-5,-5,-5,-5,-5,-5,-5,-5]) #9
         self.action_high = np.array([5,5,5,5,5,5,5,5,5])         #9
         self.action_min = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0])  #9 #first 4 from plants last 5 from WHs orderQty
@@ -215,27 +219,52 @@ class InventoryEnv(gym.Env):
         Returns: holding costs, backorder costs
         """
         t=self.period
-        #print('Back order State:',np.array(self.BO[t]))
-        backorder_costs = np.sum(np.array(self.BO[t]) * np.array(self.bo_costs))
-        hc=self.holding_costs
-        holding_costs = np.sum(np.array(self.INV[t]) * np.array(hc))
-        revenue=np.sum(np.array(self.TotalSales[t]) * np.array(self.selling_price))
-        cost_of_goods=np.sum(np.array(self.TotalCOGS[t]) * np.array(self.cost_price))
-        #self.cost_price=self.cost_price
-        #self.selling_price=self.selling_price
-        
-        ## Penalty applying
-        if t>0:
-            if np.sum(np.array(self.BO[t]))>np.sum(np.array(self.BO[t-1])):
-                backorder_costs=backorder_costs*(t+1/t)
-            if np.sum(np.array(self.INV[t]))>np.sum(np.array(self.INV[t-1])):
-                holding_costs=holding_costs*(t+1/t)
-        else:
-            backorder_costs=backorder_costs
-            holding_costs=holding_costs
         
         
-        return holding_costs, backorder_costs,revenue,cost_of_goods
+        
+        if self.unsatisfied_demand == 'backorders':
+            #print('Back order State:',np.array(self.BO[t]))
+            backorder_costs = np.sum(np.array(self.BO[t]) * np.array(self.bo_costs))
+            hc=self.holding_costs
+            holding_costs = np.sum(np.array(self.INV[t]) * np.array(hc))
+            revenue=np.sum(np.array(self.TotalSales[t]) * np.array(self.selling_price))
+            cost_of_goods=np.sum(np.array(self.TotalCOGS[t]) * np.array(self.cost_price))
+            #self.cost_price=self.cost_price
+            #self.selling_price=self.selling_price
+            
+            ## Penalty applying
+            if t>0:
+                if np.sum(np.array(self.BO[t]))>np.sum(np.array(self.BO[t-1])):
+                    backorder_costs=backorder_costs+(t+1/t)
+                if np.sum(np.array(self.INV[t]))>np.sum(np.array(self.INV[t-1])):
+                    holding_costs=holding_costs+(t+1/t)
+            else:
+                backorder_costs=backorder_costs
+                holding_costs=holding_costs
+            lost_sales_costs=0
+                
+        elif self.unsatisfied_demand != 'backorders':
+            #print('Back order State:',np.array(self.BO[t]))
+            lost_sales_costs = np.sum(np.array(self.LO[t]) * np.array(self.lo_costs))
+            hc=self.holding_costs
+            holding_costs = np.sum(np.array(self.INV[t]) * np.array(hc))
+            revenue=np.sum(np.array(self.TotalSales[t]) * np.array(self.selling_price))
+            cost_of_goods=np.sum(np.array(self.TotalCOGS[t]) * np.array(self.cost_price))
+            #self.cost_price=self.cost_price
+            #self.selling_price=self.selling_price
+            
+            ## Penalty applying
+            if t>0:
+                if np.sum(np.array(self.LO[t]))>np.sum(np.array(self.LO[t-1])):
+                    lost_sales_costs=lost_sales_costs+(t+1/t)
+                if np.sum(np.array(self.INV[t]))>np.sum(np.array(self.INV[t-1])):
+                    holding_costs=holding_costs+(t+1/t)
+            else:
+                lost_sales_costs=lost_sales_costs
+                holding_costs=holding_costs
+            backorder_costs=0
+        
+        return holding_costs, backorder_costs,lost_sales_costs,revenue,cost_of_goods
 
     def _initialize_state(self):
         """
@@ -278,93 +307,145 @@ class InventoryEnv(gym.Env):
         # State is a concatenation of demand, inventory, and pipeline at each time step
         #demand = np.hstack([self.D[d].iloc[self.period] for d in self.retail_links])
         t=self.period
-        if t == 0:
-        
-            ##inventory
-            inventory = np.hstack([self.INV[0,j] for j in range(self.no_suppliers,self.no_nodes-self.no_customers)])
-            tot_inventory=np.array(np.sum(inventory))
-            #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
+        if self.case_name=='General' or self.case_name=='Linear':
+            if t == 0:
             
-            ##Backorders
-            # All Backorders     
-            bo=[]
-            i_list, j_list = np.nonzero(self.connections)
-            for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
-                bo.append(self.BO[0, j, i])
-            bo=np.hstack(bo)
-            tot_bo=np.array(np.sum(bo))
-            
-            
-            ##Backorders
-            # All Backorders     
-            it=[]
-            i_list, j_list = np.nonzero(self.connections)
-            for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
-                it.append(self.in_transit[0, i, j])
-            it=np.hstack(it)
-        
-        else:
-            ##inventory
-            inventory = np.hstack([self.INV[t-1,j] for j in range(self.no_suppliers,self.no_nodes-self.no_customers)])
-            
-            tot_inventory=np.array(np.sum(inventory))
-            #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
-            
-            ##Backorders
-            # All Backorders     
-            bo=[]
-            i_list, j_list = np.nonzero(self.connections)
-            for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
-                bo.append(self.BO[t-1, j, i])
-            bo=np.hstack(bo)
-            tot_bo=np.array(np.sum(bo))
-            
-            
-            ##Intransit
-            # All Intransit     
-            it=[]
-            i_list, j_list = np.nonzero(self.connections)
-            for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
-                it.append(self.in_transit[t, i, j])
-            it=np.hstack(it)
-            
-            
-            ## for next time period copy the value of inventory from previous time period 
-            for i,j in enumerate(range(self.no_suppliers,self.no_nodes-self.no_customers)):##4,5,6,7,8,9,10,11,12
-                #self.INV[0,i]=inv
-                self.INV[t,j]=self.INV[t-1,j]
+                ##inventory
+                inventory = np.hstack([self.INV[0,j] for j in range(self.no_suppliers,self.no_nodes-self.no_customers)])
+                tot_inventory=np.array(np.sum(inventory))
+                #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
+                
+                ##Backorders
+                # All Backorders     
+                bo=[]
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
+                    bo.append(self.BO[0, j, i])
+                bo=np.hstack(bo)
+                tot_bo=np.array(np.sum(bo))
                 
                 
-            ## for next time period copy the value of Back orders from previous time period     
-            i_list, j_list = np.nonzero(self.connections)
-            for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
-                self.BO[t, j, i]=self.BO[t-1, j, i]
+                ##Backorders
+                # All Backorders     
+                it=[]
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
+                    it.append(self.in_transit[0, i, j])
+                it=np.hstack(it)
             
-            ## for next time period copy the value of Intransit from previous time period     
-            #i_list, j_list = np.nonzero(self.connections)
-            #for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
-            #    self.in_transit[t, i, j]=self.in_transit[t-1, i, j]
+            else:
+                ##inventory
+                inventory = np.hstack([self.INV[t-1,j] for j in range(self.no_suppliers,self.no_nodes-self.no_customers)])
+                
+                tot_inventory=np.array(np.sum(inventory))
+                #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
+                
+                ##Backorders
+                # All Backorders     
+                bo=[]
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
+                    bo.append(self.BO[t-1, j, i])
+                bo=np.hstack(bo)
+                tot_bo=np.array(np.sum(bo))
+                
+                
+                ##Intransit
+                # All Intransit     
+                it=[]
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
+                    it.append(self.in_transit[t, i, j])
+                it=np.hstack(it)
+                
+                
+                ## for next time period copy the value of inventory from previous time period 
+                for i,j in enumerate(range(self.no_suppliers,self.no_nodes-self.no_customers)):##4,5,6,7,8,9,10,11,12
+                    #self.INV[0,i]=inv
+                    self.INV[t,j]=self.INV[t-1,j]
+                    
+                    
+                ## for next time period copy the value of Back orders from previous time period     
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
+                    self.BO[t, j, i]=self.BO[t-1, j, i]
+                
+                ## for next time period copy the value of Intransit from previous time period     
+                #i_list, j_list = np.nonzero(self.connections)
+                #for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
+                #    self.in_transit[t, i, j]=self.in_transit[t-1, i, j]
+                
+        elif self.case_name=='Divergent':
+            if t == 0:
+            
+                ##inventory
+                inventory = np.hstack([self.INV[0,j] for j in range(self.no_suppliers,self.no_nodes-self.no_customers)])
+                tot_inventory=np.array(np.sum(inventory))
+                #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
+                
+                ##Backorders
+                # All Backorders     
+                bo=[]
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
+                    bo.append(self.BO[0, j, i])
+                bo=np.hstack(bo)
+                tot_bo=np.array(np.sum(bo))
+                
+                
+                ##Backorders
+                # All Backorders     
+                it=[]
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
+                    it.append(self.in_transit[0, i, j])
+                it=np.hstack(it)
+            
+            else:
+                ##inventory
+                inventory = np.hstack([self.INV[t-1,j] for j in range(self.no_suppliers,self.no_nodes-self.no_customers)])
+                
+                tot_inventory=np.array(np.sum(inventory))
+                #np.hstack([self.X[n].iloc[self.period] for n in self.main_nodes])
+                
+                ##Backorders
+                # All Backorders     
+                bo=[]
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
+                    bo.append(self.BO[t-1, j, i])
+                bo=np.hstack(bo)
+                tot_bo=np.array(np.sum(bo))
+                
+                
+                ##Intransit
+                # All Intransit     
+                it=[]
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
+                    it.append(self.in_transit[t, i, j])
+                it=np.hstack(it)
+                
+                
+                ## for next time period copy the value of inventory from previous time period 
+                for i,j in enumerate(range(self.no_suppliers,self.no_nodes-self.no_customers)):##4,5,6,7,8,9,10,11,12
+                    #self.INV[0,i]=inv
+                    self.INV[t,j]=self.INV[t-1,j]
+                    
+                    
+                ## for next time period copy the value of Back orders from previous time period     
+                i_list, j_list = np.nonzero(self.connections)
+                for i, j in zip(i_list[self.no_suppliers:], j_list[self.no_suppliers:]):
+                    self.BO[t, j, i]=self.BO[t-1, j, i]
+                
+                ## for next time period copy the value of Intransit from previous time period     
+                #i_list, j_list = np.nonzero(self.connections)
+                #for i, j in zip(i_list[:-self.no_customers], j_list[:-self.no_customers]):
+                #    self.in_transit[t, i, j]=self.in_transit[t-1, i, j]
+
             
         
         
-        # Pipeline values won't be of proper dimension if current
-        # current period < lead time. We need to add 0's as padding.
-        # if self.period == 0:
-        #     _pipeline = [[self.Y[k].iloc[0]]
-        #         for k, v in self.lead_times.items()]
-        # else:
-        #     _pipeline = [self.Y[k].iloc[max(self.period-v,0):self.period].values
-        #         for k, v in self.lead_times.items()]
-        # pipeline = []
-        # for p, v in zip(_pipeline, self.lead_times.values()):
-        #     if v == 0:
-        #         continue
-        #     if len(p) <= v:
-        #         pipe = np.zeros(v)
-        #         pipe[-len(p):] += p
-        #     pipeline.append(pipe)
-        # pipeline = np.hstack(pipeline)
-        # 
         
         self.state = np.hstack([tot_inventory,tot_bo, inventory, bo,it]) ## 1,1,9,19,18 dimensions
 
@@ -386,8 +467,9 @@ class InventoryEnv(gym.Env):
             for j in range(i + 1, self.no_stockpoints +self.no_suppliers):
                    #delivery = self.T[t, i, j] ## all deliveries for current time step 
                    delivery = self.T[t, j, i] ## all deliveries for current time step
-                   #print(f'Receiving into {j} from {i} of quantity {delivery}')
+                   print(f'Receiving into {j} from {i} of quantity {delivery}')
                    self.INV[t, j] += delivery
+                   print(f'Increasing Inventory of {j} of quantity {delivery}')
                    self.in_transit[t, i, j] -= delivery
                    #self.T[t, i, j] = 0
                    self.T[t, j, i] = 0
@@ -505,9 +587,13 @@ class InventoryEnv(gym.Env):
                                 self.TotalFulfilled[j,i] += inventory
                             if self.unsatisfied_demand == 'backorders':
                                 self.BO[t, j, i] += quantity
-                                print(f'After 1st else Backorder from {j} to {i} of quantity {quantity}')
+                                print(f'Backorder from {j} to {i} of quantity {quantity}')
+                                #print(f'After 1st else Backorder from {j} to {i} of quantity {quantity}')
                                 if self.t >= self.warmup:
                                     self.TotalBO[j,i] += quantity
+                            else:
+                                self.LO[t, j, i] += quantity
+                                print(f'Lost Order from {j} to {i} of quantity {quantity}')
             print('COGS for Node',self.TotalCOGS[t,i])                         
             print('Sales for Node',self.TotalSales[t,i])                      
         if self.unsatisfied_demand == 'backorders':
@@ -540,79 +626,152 @@ class InventoryEnv(gym.Env):
                                 self.TotalCOGS[t,i]+=inventory
                         print(f'Outer if else Inventory from {i} to {j} of quantity {inventory}')
                         self.BO[t, j, i] -= inventory
-                        #print(f'Backorder from {j} to {i} of quantity {quantity}')
+                        print(f'Backorder from {j} to {i} of quantity {inventory}')
                 #print('COGS for Node',self.TotalCOGS[t,i])                         
                 #print('Sales for Node',self.TotalSales[t,i])   
         
     def _recieve_incoming_orders_customers(self):
+        t=self.period         
+        self.t=self.period  
+        tmp=np.array(self.stockpoints_echelon)        
+        tmp1=np.sum(tmp[:-2]) ## since last layer is retailer and its previous is WH
+        
         i_list, j_list = np.nonzero(self.connections)
         for i, j in zip(i_list[-self.no_customers:], j_list[-self.no_customers:]):
-            if self.O[0, j, i] > 0:
+            print(f'Node-{i}')
+            print(f'Inventory Needed-{np.sum(self.O[t, j, i], 0)}')
+            print(f'Inventory Available-{np.sum(self.INV[t, i])}')
+            if self.O[t, j, i] > 0:
             # Check if the current order can be fulfilled
-                if self.INV[0, i] >= self.O[0, j, i]:
-                    self._fulfill_order(i, j, self.O[0, j, i])
+                if self.INV[t, i] >= self.O[t, j, i]:
+                    self._fulfill_order(i, j, self.O[t, j, i])
+                    print(f'Outermost Loop Inventory from {i} to {j} of quantity {self.O[t, j, i]}')
+                    if i <= self.no_nodes - self.no_customers and i >= tmp1:
+                            self.TotalSales[t,i]+=self.O[t, j, i]
+                    if i <= self.no_suppliers:
+                            self.TotalCOGS[t,i]+=self.O[t, j, i]
                     # Else, fulfill as far as possible
                 else:
-                    inventory = max(self.INV[0, i], 0)
-                    quantity = self.O[0, j, i] - inventory
+                    inventory = max(self.INV[t, i], 0)
+                    quantity = self.O[t, j, i] - inventory
                     self._fulfill_order(i, j, inventory)
+                    print(f'Outermost Loop Next Inventory from {i} to {j} of quantity {inventory}')
+                    if i <= self.no_nodes - self.no_customers and i >= tmp1:
+                            self.TotalSales[t,i]+=inventory
+                    if i <= self.no_suppliers:
+                            self.TotalCOGS[t,i]+=inventory
                     # Add to backorder if applicable
                     if self.unsatisfied_demand == 'backorders':
-                        self.BO[0, j, i] += quantity
+                        self.BO[t, j, i] += quantity
+                        print(f'Backorder from {j} to {i} of quantity {quantity}')
+                    else:
+                        self.LO[t, j, i] += quantity
+                        print(f'Lost Order from {j} to {i} of quantity {quantity}')
         if self.unsatisfied_demand == 'backorders':
             for i, j in zip(i_list[-self.no_customers:], j_list[-self.no_customers:]):
-                inventory = self.INV[0, i]
+                inventory = self.INV[t, i]
+                print(f'Node-{i}')
+                print(f'Inventory Available-{inventory}')
                 # If there are any backorders, fulfill them afterwards
                 if inventory > 0:
                     # If the inventory is larger than the backorder
                     # Fulfill the whole backorder
-                    backorder = self.BO[0, j, i]
+                    backorder = self.BO[t, j, i]
                     if inventory >= backorder:
-                    # Dit vind ik heel onlogisch, maar voorzover ik nu kan zien
-                    # in de IPs komt de backorder nooit aan.
-                    # Nu wel gedaan dmv fix
+                    # I find this very illogical, but as far as I can see now
+                    # in the IPs the backorder never arrives.
+                    # Now done with fix
                         if self.fix:
                             self._fulfill_order(i, j, backorder)
+                            print(f'Outermost but one if else Inventory from {i} to {j} of quantity {backorder}')
+                            if i <= self.no_nodes - self.no_customers and i >= tmp1:
+                                self.TotalSales[t,i]+=backorder
+                            if i <= self.no_suppliers:
+                                self.TotalCOGS[t,i]+=backorder
                         else:
-                            self.INV[0, i] -= backorder
-                            self.BO[0, j, i] = 0
+                            self.INV[t, i] -= backorder
+                            self.BO[t, j, i] = 0
                             # Else, fulfill the entire inventory
                     else:
                         self._fulfill_order(i, j, inventory)
-                        self.BO[0, j, i] -= inventory
+                        print(f'Outermost if else Inventory from {i} to {j} of quantity {inventory}')
+                        if i <= self.no_nodes - self.no_customers and i >= tmp1:
+                                self.TotalSales[t,i]+=inventory
+                        if i <= self.no_suppliers:
+                                self.TotalCOGS[t,i]+=inventory
+                        self.BO[t, j, i] -= inventory
+
                         
     def _recieve_incoming_orders_divergent(self):
     # Ship from supplier to warehouse
-        self._fulfill_order(0, 1, self.O[0, 1, 0])
+        t=self.period         
+        self.t=self.period  
+        tmp=np.array(self.stockpoints_echelon)        
+        tmp1=np.sum(tmp[:-2])
+        
+        self._fulfill_order(0, 1, self.O[t, 1, 0])
+        self.TotalCOGS[t,0]+=self.O[t, 1, 0]
         # Check if the warehouse can ship all orders
-        if self.INV[0, 1] >= np.sum(self.O[0, :, 1], 0):
+        print(f'Node-1')
+        print(f'Inventory Needed-{np.sum(self.O[t, :, 1], 0)}')
+        print(f'Inventory Available-{np.sum(self.INV[t, 1])}')
+        if self.INV[t, 1] >= np.sum(self.O[t, :, 1], 0):
             i_list, j_list = np.nonzero(self.connections)
             for i, j in zip(i_list[self.no_suppliers:self.no_suppliers+
                 self.no_stockpoints],
                 j_list[self.no_suppliers:self.no_suppliers+
                 self.no_stockpoints]):
-                if self.O[0, j, i] > 0:
-                    self._fulfill_order(i, j, self.O[0, j, i])
+                if self.O[t, j, i] > 0:
+                    self._fulfill_order(i, j, self.O[t, j, i])
+                    print(f'Outer Loop - Inventory from {i} to {j} of quantity {self.O[t, j, i]}')
+                    if i <= self.no_nodes - self.no_customers and i >= tmp1:
+                            self.TotalSales[t,i]+=self.O[t, j, i]
+                    if i <= self.no_suppliers:
+                            self.TotalCOGS[t,i]+=self.O[t, j, i]
         else:
             IPlist = {}
-            i_list, _ = np.nonzero(self.O[0])
-            bo_echelon = np.sum(self.BO[0], 0)
+            #i_list, _ = np.nonzero(self.O[t])
+            i_list, _ = np.nonzero(self.O[t])
+            #print('i_list:',i_list)
+            #print('BO:',self.BO[t])
+            bo_echelon = np.sum(self.BO[t], 0)
+            #print('bo_echelon:',bo_echelon)
             for i in i_list:
-                IPlist[i] = self.INV[0, i] - bo_echelon[i]
-        # Check the lowest inventory position and sort these on lowest IP
-        sorted_IP = {k: v for k, v in sorted(IPlist.items(), key=lambda item: item[1])}
-        # Check if there is still inventory left
-        if self.INV[0, 1] >= 0:
-            for i in sorted_IP:
-            # Check if the remaining order can be fulfilled completely
-                if self.INV[0, 1] >= self.O[0, i, 1]:
-                    self._fulfill_order(1, i, self.O[0, i, 1])
-                else:
-                    # Else, fulfill how far possible
-                    inventory = max(self.INV[0, 1], 0)
-                    quantity = self.O[0, i, 1] - inventory
-                    self._fulfill_order(1, i, inventory)
-                    break
+                #print(i)
+                IPlist[i] = self.INV[t, i] - bo_echelon[i]
+            # Check the lowest inventory position and sort these on lowest IP
+            sorted_IP = {k: v for k, v in sorted(IPlist.items(), key=lambda item: item[1])}
+            print('sorted_IP:',sorted_IP)
+            # Check if there is still inventory left
+            if self.INV[t, 1] >= 0:
+                for i in sorted_IP:
+                    # Check if the remaining order can be fulfilled completely
+                    if self.INV[t, 1] >= self.O[t, i, 1]:
+                        #print('i',i)
+                        #self._fulfill_order(t+1, i, self.O[t, i, 1])
+                        self._fulfill_order(1, i, self.O[t, i, 1])
+                        print(f'Outer Else 1 - Inventory from 1 to {i} of quantity {self.O[t, i, 1]}')
+                        if i <= self.no_nodes - self.no_customers and i >= tmp1:
+                                self.TotalSales[t,i]+=self.O[t, i, 1]
+                        if i <= self.no_suppliers:
+                                self.TotalCOGS[t,i]+=self.O[t, i, 1]
+                    else:
+                        # Else, fulfill how far possible
+                        inventory = max(self.INV[t, 1], 0)
+                        quantity = self.O[t, i, 1] - inventory
+                        self._fulfill_order(1, i, inventory)
+                        print(f'Outer Else 2 - Inventory from 1 to {i} of quantity {inventory}')
+                        if i <= self.no_nodes - self.no_customers and i >= tmp1:
+                                self.TotalSales[t,i]+=inventory
+                        if i <= self.no_suppliers:
+                                self.TotalCOGS[t,i]+=inventory
+                        if self.unsatisfied_demand == 'backorders':
+                            self.BO[t, i, 1] += quantity
+                            print(f'Backorder from {i} to 1 of quantity {quantity}')
+                        else:
+                            self.LO[t, i, 1] += quantity
+                            print(f'Lost Sales from {i} to 1 of quantity {quantity}')
+                        #break
                     
     def _fulfill_order(self, source, destination, quantity):
         # Customers don't have any lead time.
@@ -632,20 +791,20 @@ class InventoryEnv(gym.Env):
         else:
             # If the order is not fulfilled immediately, denote the time when
             # the order will be delivered. This can not be larger than the horizon
-            print((leadtime))
-            print((self.n))
-            print((self.horizon))
-            print((self.warmup))
-            print((self.divide))
-            print((self.num_of_periods))
-            if leadtime < self.n[0]:
+            #print((leadtime))
+            #print((self.n))
+            #print((self.horizon))
+            #print((self.warmup))
+            #print((self.divide))
+            #print((self.num_of_periods))
+            if leadtime < self.n:
                 #self.T[t+leadtime, source, destination] += quantity
                 self.T[t+leadtime, destination,source] += quantity
                 self.in_transit[t+leadtime, source, destination] += quantity
-                print(f'Inventory wiil be increased on period {t+leadtime} of Node {destination} by quantity {quantity}')
+                print(f'Inventory will be increased on period {t+leadtime} of Node {destination} by quantity {quantity}')
             else:
                 raise NotImplementedError
-                for k in range(0, min(leadtime, self.n[0]) + 1):
+                for k in range(0, min(leadtime, self.n) + 1):
                     self.in_transit[t+k, source, destination] += quantity
         # Suppliers have unlimited capacity
         if source >= self.no_suppliers:
@@ -654,24 +813,42 @@ class InventoryEnv(gym.Env):
             
     def _place_outgoing_order(self, t, action):
         k = 0
-        
-        incomingOrders = np.sum(self.O[t-1], 0)
-        # Loop over all suppliers and stockpoints
-        for j in range(self.no_suppliers, self.no_stockpoints +
-            self.no_suppliers):
-            RandomNumber = random.random()
-            probability = 0
-            for i in range(0, self.no_stockpoints + self.no_suppliers):
-                if self.connections[i, j] == 1:
-                    self._place_order(i,j,t,k, action, incomingOrders)
-                    
-                    k += 1
-                elif self.connections[i,j] > 0:
-                    probability += self.connections[i,j]
-                    if RandomNumber < probability:
+        if self.case_name=='General':
+            incomingOrders = np.sum(self.O[t-1], 0)
+            # Loop over all suppliers and stockpoints
+            for j in range(self.no_suppliers, self.no_stockpoints +
+                self.no_suppliers):
+                RandomNumber = random.random()
+                probability = 0
+                for i in range(0, self.no_stockpoints + self.no_suppliers):
+                    if self.connections[i, j] == 1:
                         self._place_order(i,j,t,k, action, incomingOrders)
+                        
                         k += 1
-                        break
+                    elif self.connections[i,j] > 0:
+                        probability += self.connections[i,j]
+                        if RandomNumber < probability:
+                            self._place_order(i,j,t,k, action, incomingOrders)
+                            k += 1
+                            break
+        elif self.case_name=='Divergent':
+            incomingOrders = np.sum(self.O[t], 0)
+            # Loop over all suppliers and stockpoints
+            for j in range(self.no_suppliers, self.no_stockpoints +
+                self.no_suppliers):
+                RandomNumber = random.random()
+                probability = 0
+                for i in range(0, self.no_stockpoints + self.no_suppliers):
+                    if self.connections[i, j] == 1:
+                        self._place_order(i,j,t,k, action, incomingOrders)
+                        
+                        k += 1
+                    elif self.connections[i,j] > 0:
+                        probability += self.connections[i,j]
+                        if RandomNumber < probability:
+                            self._place_order(i,j,t,k, action, incomingOrders)
+                            k += 1
+                            break
                         
     def _place_order(self, i, j, t, k, action, incomingOrders):
         
@@ -732,7 +909,7 @@ class InventoryEnv(gym.Env):
         
         
 
-        if self.case_name == "General":
+        if self.case_name == "General" or self.case_name=='Linear':
             self._generate_demand() ## order from customer to retail i.e. last leg
             self._receive_incoming_delivery()
             if visualize: self._visualize("1. Delivery")
@@ -743,7 +920,7 @@ class InventoryEnv(gym.Env):
         elif self.case_name == "Divergent":
             # According to the paper:
             # (1) Warehouse places order to external supplier
-            self._place_outgoing_order(0, action)
+            self._place_outgoing_order(self.period, action)
             if visualize: self._visualize("1. Warehouse order")
             # (2) Warehouse ships the orders to retailers taking the inventory position into account
             self._recieve_incoming_orders_divergent()
@@ -759,9 +936,11 @@ class InventoryEnv(gym.Env):
             raise NotImplementedError
             
         #CIP = self._code_state()
-        holding_costs, backorder_costs,revenue,cost_of_goods = self.calculate_reward()
-        reward = revenue-(cost_of_goods+holding_costs + backorder_costs + penalty )
-            
+        holding_costs, backorder_costs,lost_sales_costs,revenue,cost_of_goods = self.calculate_reward()
+        reward = revenue-(cost_of_goods+holding_costs + backorder_costs+lost_sales_costs + penalty )
+        
+        print('Inventory at end of period :',self.INV[self.period])
+        
         # update period
         self.period += 1
         
@@ -777,6 +956,7 @@ class InventoryEnv(gym.Env):
         print('COGS :',cost_of_goods)
         print('Holding Costs :',holding_costs)
         print('Back Order Costs :',backorder_costs)
+        print('Lost Order Sales :',lost_sales_costs)
         print('Reward :',reward)
         
         
@@ -790,6 +970,7 @@ class InventoryEnv(gym.Env):
         self.INV = [[0 for _ in range(self.no_nodes)] for _ in range(self.num_of_periods+10)] #Inventory at each stock point
         
         self.BO = [[[0 for _ in range(self.no_nodes)] for _ in range(self.no_nodes)] for _ in range(self.num_of_periods+10)] #BackOrder for every i,j connection
+        self.LO = [[[0 for _ in range(self.no_nodes)] for _ in range(self.no_nodes)] for _ in range(self.num_of_periods+10)] #BackOrder for every i,j connection ##lost sales 
         
         self.in_transit = [[[0 for _ in range(self.no_nodes)] for _ in range(self.no_nodes)] for _ in range(self.num_of_periods+10)] #Intrasnit for every i,j connection
         
@@ -805,9 +986,11 @@ class InventoryEnv(gym.Env):
         
         self.TotalSales = [[0 for _ in range(self.no_nodes)] for _ in range(self.num_of_periods+10)] #Inventory at each stock point
         self.TotalCOGS = [[0 for _ in range(self.no_nodes)] for _ in range(self.num_of_periods+10)] #Inventory at each stock point
+        #self.TotalCOGS = [[0 for _ in range(self.no_nodes)] for _ in range(self.num_of_periods+10)] #Inventory at each stock point
         
         self.INV=np.array(self.INV)
         self.BO=np.array(self.BO)
+        self.LO=np.array(self.LO)
         self.in_transit=np.array(self.in_transit)
         self.T=np.array(self.T)
         self.O=np.array(self.O)
