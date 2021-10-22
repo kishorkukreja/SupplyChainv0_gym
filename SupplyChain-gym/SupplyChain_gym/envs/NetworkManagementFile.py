@@ -1,9 +1,3 @@
-'''
-Multi-period inventory management
-Hector Perez, Christian Hubbs, Can Li
-9/14/2020
-'''
-
 import gym
 import itertools
 import numpy as np
