@@ -1,7 +1,8 @@
 # SupplyChainv0-gym
 ## Reinforcement Learning for Optimal inventory policy
 ## Environments for Supply chain
-I sincerely thank Hector Perez, Christian Hubbs, , Owais Sarwar, and Can Li for their work on Multi-period inventory management.
+
+I sincerely thank Christian D. Hubbs and Hector D. Perez and Owais Sarwar and Nikolaos V. Sahinidis and Ignacio E. Grossmann and John M. Wassick for their work on Multi-period inventory and network management.
 The enviroments have been borrowed from OR-gym library and have been modified to suit the needs
 SupplychainV0 has been borrowed from Kevin Greevers CBC case study on reinforcement learning for inventory optimization
 
@@ -13,11 +14,7 @@ This library requires Python 3.5+ in order to function.
 
 For the RL algorithms, Ray 1.0.0 is required.
 
-Installation is possible via `pip`:
-
-`$ pip install SupplyChain-gym`
-
-Or, you can install directly from GitHub with:
+You can install directly from GitHub with:
 
 ```
 git clone https://github.com/kishorkukreja/SupplyChainv0_gym.git
@@ -25,7 +22,7 @@ cd SupplyChain-gym
 pip install -e .
 ```
 
-## Citation
+## References
 ```
 @misc{HubbsOR-Gym,
     author={Christian D. Hubbs and Hector D. Perez and Owais Sarwar and Nikolaos V. Sahinidis and Ignacio E. Grossmann and John M. Wassick},
