@@ -40,7 +40,7 @@ pip install -e .
 ```
 
 ## Environments
-- `SupplyChainEnv-v0`: multi-echelon supply chain for Linear, divergent and general Supply chain.
+- `SupplyChainEnv-v0`: multi-echelon supply chain for Linear, Divergent and General cases with and without backlogs.
 - `InventoryManagement-v1`: multi-echelon supply chain re-order problem with backlogs.
 - `InventoryManagement-v2`: multi-echelon supply chain re-order problem without backlog.
 - `NetworkManagement-v1`: multi-echelon supply chain network problem with backlogs from [Perez et al.](https://www.mdpi.com/2227-9717/9/1/102).
