@@ -30,6 +30,13 @@ pip install -e .
     year={2020},
     Eprint={arXiv:2008.06319}
 }
+
+@misc{HubbsOR-Gym,
+    author={Kevin Geevers},
+    title={Deep Reinforcement Learning in InventoryManagement},
+    year={2020},
+    Eprint={http://essay.utwente.nl/85432/1/Geevers_MA_BMS.pdf}
+}
 ```
 
 ## Environments
