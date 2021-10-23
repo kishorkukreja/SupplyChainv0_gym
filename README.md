@@ -1,6 +1,6 @@
 # SupplyChainv0-gym
-## Reinforcement Learning for Optimal inventory policy
-## Environments for Supply chain
+Reinforcement Learning for Optimal inventory policy
+Environments for Supply chain
 
 I sincerely thank Christian D. Hubbs and Hector D. Perez and Owais Sarwar and Nikolaos V. Sahinidis and Ignacio E. Grossmann and John M. Wassick for their work on Multi-period inventory and network management.
 The enviroments have been borrowed from OR-gym library and have been modified to suit the needs
@@ -31,10 +31,10 @@ pip install -e .
     Eprint={arXiv:2008.06319}
 }
 
-@misc{HubbsOR-Gym,
-    author={Kevin Geevers},
+@misc{author={Kevin Geevers},
     title={Deep Reinforcement Learning in InventoryManagement},
     year={2020},
+    month={December},
     Eprint={http://essay.utwente.nl/85432/1/Geevers_MA_BMS.pdf}
 }
 ```
